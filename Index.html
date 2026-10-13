@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Group Split Calculator</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#f2f4f8;color:#202633;margin:0;padding:16px}.app{max-width:720px;margin:auto}header,.card{background:white;border:1px solid #dfe5ee;border-radius:15px;padding:16px;margin-bottom:14px}h1,h2{color:#203b60;margin-top:0}h1{font-size:1.6rem}label{display:block;font-weight:600;margin:12px 0 6px}input,select{font:inherit;padding:11px;border:1px solid #cbd2dc;border-radius:9px;width:100%;box-sizing:border-box}button{font:inherit;border:0;border-radius:9px;padding:10px 12px;background:#e8eef8;color:#26456d;font-weight:650;cursor:pointer}.primary{background:#2563eb;color:white;width:100%;margin-top:14px;padding:13px}.danger{background:#fff0f0;color:#b42318}.row,.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}.row input{flex:1;min-width:130px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.person,.item{background:#f1f5f9;border-radius:10px;padding:10px;margin-top:8px}.person{display:flex;gap:8px;align-items:center}.person input{width:18px}.person span{flex:1}.muted{color:#64748b;font-size:.9rem}.stat{background:#eaf0ff;padding:12px;border-radius:10px;margin:5px 0}.stat strong{color:#245ce8}.item{background:white;border:1px solid #e3e8ef}.itemtop{display:flex;justify-content:space-between;gap:8px}.money{color:#245ce8;font-weight:750}.notice{background:#f5f8ff;border:1px solid #c9d8fb;padding:12px;border-radius:10px;line-height:1.5}.hidden{display:none}@media(max-width:430px){body{padding:9px}.card,header{padding:13px}}
+</style></head><body><main class="app">
+<header><h1>👥 Group Split Calculator</h1><p class="muted">Create a group, calculate expenses, finish it, then start another.</p></header>
+<section class="card">
+<h2>Start fresh or view previous calculations</h2>
+<div class="actions">
+<button id="newCalculation" class="primary">＋ Start New Calculation</button>
+<button id="toggleArchive">View Previous Calculations</button>
+</div>
+<p class="muted">Starting fresh saves the current calculation to your history first.</p>
+<div id="archivePanel" class="hidden"></div>
+</section>
+<div class="hidden" aria-hidden="true"><select id="groups"></select><input id="groupName"><button id="create"></button><button id="finish"></button><button id="delete"></button><p id="groupInfo"></p></div>
+<section class="card"><h2>1. Manage members</h2><div class="row"><input id="newMember" placeholder="Enter member name"><button id="addMember">＋ Add</button></div><div id="members"></div><p class="muted">Member names are shared across all groups. Removing a member affects all groups' calculations.</p></section>
+<section class="card"><h2>2. Add collection</h2><label for="desc">Collection description</label><input id="desc" placeholder="e.g. Trip, Food, Grocery"><label for="amount">Amount (₹)</label><input id="amount" type="number" min="0.01" step="0.01" placeholder="e.g. 6000"><p><b>Select participants</b> <span id="selectedCount" class="muted"></span></p><div class="actions"><button id="all">Select all</button><button id="none">Deselect all</button></div><div id="participants" class="grid"></div><div id="preview" class="stat hidden"></div><button id="saveExpense" class="primary">Save collection</button><p id="message" class="muted">Automatically saved in this browser on this device.</p></section>
+<section class="card"><h2>3. Collection history</h2><div id="history"></div></section>
+<section class="card"><h2>4. Total share per member</h2><p class="muted">Total share across expenses they participated in.</p><div class="stat"><b>Group total: <strong id="total">₹0.00</strong></b></div><div id="balances"></div><div class="actions"><button id="copy">Copy summary</button><button id="exportGroup">Export this group</button><button id="exportAll">Export all groups</button><button id="import">Import backup</button><input id="file" type="file" accept=".json,application/json" class="hidden"></div><p class="muted">This totals each person's share. It does not track who paid or calculate reimbursements.</p></section>
+<section class="card"><h2>Optional cloud storage</h2><div class="notice"><b>Not connected to cloud.</b> This version saves all groups in this browser. Cloud storage is possible later with a service such as Supabase, but it needs a database project and secure access rules. Do not enter passwords or secret keys into this page. <a href="https://supabase.com/" target="_blank" rel="noopener">Explore Supabase</a>.</div></section>
+</main><script>
+const KEY='groupSplitCalculatorMultiGroup_v1', $=id=>document.getElementById(id);
+let state={members:[],groups:[{id:'g1',name:'Group 1',expenses:[],finished:false}],active:'g1',selected:[]};
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money=n=>'₹'+Number(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+const group=()=>state.groups.find(g=>g.id===state.active)||state.groups[0];
+
+const ARCHIVE_KEY='groupSplitCalculatorArchives_v1';
+function getArchives(){try{const a=JSON.parse(localStorage.getItem(ARCHIVE_KEY)||'[]');return Array.isArray(a)?a:[]}catch(e){return []}}
+function saveArchives(a){localStorage.setItem(ARCHIVE_KEY,JSON.stringify(a))}
+function snapshotCurrent(){
+  const g=group();
+  if(!state.members.length && !g.expenses.length) return false;
+  const archives=getArchives();
+  const copy=JSON.parse(JSON.stringify({name:g.name||'Calculation',members:state.members,group:g,savedAt:new Date().toISOString()}));
+  archives.unshift(copy);
+  saveArchives(archives);
+  return true;
+}
+function renderArchives(){
+  const panel=$('archivePanel'), archives=getArchives();
+  panel.innerHTML=archives.length?archives.map((a,i)=>{
+    const expenses=(a.group&&Array.isArray(a.group.expenses))?a.group.expenses:[];
+    const total=expenses.reduce((sum,e)=>sum+Number(e.amount||0),0);
+    const shares=Object.fromEntries((a.members||[]).map(n=>[n,0]));
+    expenses.forEach(e=>(e.people||[]).forEach(n=>{if(n in shares)shares[n]+=Number(e.amount||0)/(e.people.length||1)}));
+    const date=a.savedAt?new Date(a.savedAt).toLocaleString():'Date not recorded';
+    return `<div class="item"><div class="itemtop"><b>${esc(a.name||'Previous calculation')}</b><span class="money">${money(total)}</span></div><p class="muted">${esc(date)} · ${expenses.length} collections</p><p>${(a.members||[]).map(esc).join(', ')||'No members'}</p><div class="actions"><button data-archive-view="${i}">View summary</button><button class="danger" data-archive-delete="${i}">Delete history</button></div><div id="archiveDetail${i}" class="hidden"><p>${Object.entries(shares).map(([n,v])=>`${esc(n)}: ${money(v)}`).join('<br>')||'No member totals'}</p>${expenses.map((e,j)=>`<p>${j+1}. ${esc(e.desc)} · ${money(e.amount)} · ${(e.people||[]).map(esc).join(', ')}</p>`).join('')}</div></div>`;
+  }).join(''):'<p class="muted">No previous calculations saved yet.</p>';
+}
+$('newCalculation').onclick=()=>{
+  const g=group();
+  if(!confirm('Save this calculation to Previous Calculations and start completely empty?'))return;
+  snapshotCurrent();
+  state={members:[],groups:[{id:'g'+Date.now(),name:'Group 1',expenses:[],finished:false}],active:null,selected:[]};
+  state.active=state.groups[0].id;
+  $('desc').value=$('amount').value=$('newMember').value='';
+  persist();render();renderArchives();
+  $('message').textContent='New empty calculation started. Previous results are saved below.';
+};
+$('toggleArchive').onclick=()=>{
+  const p=$('archivePanel');
+  p.classList.toggle('hidden');
+  $('toggleArchive').textContent=p.classList.contains('hidden')?'View Previous Calculations':'Hide Previous Calculations';
+  if(!p.classList.contains('hidden'))renderArchives();
+};
+$('archivePanel').onclick=e=>{
+  const v=e.target.closest('[data-archive-view]');
+  if(v){$('archiveDetail'+v.dataset.archiveView).classList.toggle('hidden');return}
+  const d=e.target.closest('[data-archive-delete]');
+  if(d&&confirm('Permanently delete this saved calculation?')){
+    const a=getArchives();a.splice(Number(d.dataset.archiveDelete),1);saveArchives(a);renderArchives();
+  }
+};
+
+function load(){try{let d=JSON.parse(localStorage.getItem(KEY));if(d&&Array.isArray(d.members)&&Array.isArray(d.groups)&&d.groups.length){state=d;if(!state.groups.some(g=>g.id===state.active))state.active=state.groups[0].id;state.selected=state.selected||state.members.slice()}}catch(e){}}
+function persist(){try{localStorage.setItem(KEY,JSON.stringify(state));$('message').textContent='Saved automatically in this browser.'}catch(e){$('message').textContent='Browser storage unavailable. Export a backup.'}}
+function render(){let g=group();$('groups').innerHTML=state.groups.map(x=>`<option value="${esc(x.id)}" ${x.id===g.id?'selected':''}>${esc(x.name)}${x.finished?' (Finished)':''}</option>`).join('');$('groupInfo').textContent=g.finished?'This group is finished. You can view its history, or create another group.':'This group is active. Its expenses are separate from other groups.';$('finish').disabled=g.finished;$('finish').textContent=g.finished?'Group finished ✓':'Finish current group';
+$('members').innerHTML=state.members.map((n,i)=>`<div class="person"><span>${esc(n)}</span><button class="danger" data-remove="${i}">Remove</button></div>`).join('')||'<p class="muted">No members yet.</p>';
+state.selected=state.selected.filter(n=>state.members.includes(n));$('participants').innerHTML=state.members.map((n,i)=>`<label class="person"><input type="checkbox" data-person="${i}" ${state.selected.includes(n)?'checked':''} ${g.finished?'disabled':''}><span>${esc(n)}</span></label>`).join('');$('selectedCount').textContent=`${state.selected.length} of ${state.members.length} selected`;
+let a=Number($('amount').value);$('preview').classList.toggle('hidden',!(a>0&&state.selected.length));if(a>0&&state.selected.length)$('preview').innerHTML=`<span class="muted">Share per selected member</span><br><strong>${money(a/state.selected.length)}</strong> <span class="muted">${money(a)} ÷ ${state.selected.length}</span>`;
+$('desc').disabled=$('amount').disabled=$('saveExpense').disabled=g.finished;
+$('history').innerHTML=g.expenses.length?g.expenses.map((e,i)=>`<div class="item"><div class="itemtop"><b>${i+1}. ${esc(e.desc)}</b><span class="money">${money(e.amount)}</span></div><p class="muted">${e.people.length} members · ${money(e.amount/e.people.length)} each</p><p>${e.people.map(esc).join(', ')}</p>${g.finished?'':`<button class="danger" data-delete="${esc(e.id)}">Delete collection</button>`}</div>`).join(''):'<p class="muted">No collections in this group yet.</p>';
+let shares=Object.fromEntries(state.members.map(n=>[n,0]));g.expenses.forEach(e=>e.people.forEach(n=>{if(n in shares)shares[n]+=e.amount/e.people.length}));$('balances').innerHTML=state.members.map(n=>`<div class="item itemtop"><b>${esc(n)}</b><span class="money">${money(shares[n])}</span></div>`).join('');$('total').textContent=money(g.expenses.reduce((s,e)=>s+e.amount,0));}
+$('groups').onchange=()=>{state.active=$('groups').value;state.selected=state.members.slice();$('desc').value=$('amount').value='';persist();render()};
+$('create').onclick=()=>{let name=$('groupName').value.trim()||'Group '+(state.groups.length+1);if(state.groups.some(g=>g.name.toLowerCase()===name.toLowerCase())){alert('That group name already exists.');return}let g={id:'g'+Date.now(),name,expenses:[],finished:false};state.groups.push(g);state.active=g.id;state.selected=state.members.slice();$('groupName').value=$('desc').value=$('amount').value='';persist();render();$('message').textContent='New group created.'};
+$('finish').onclick=()=>{if(group().finished)return;if(confirm('Finish this group? Its history will be kept and you cannot add more expenses to it.')){group().finished=true;persist();render()}};
+$('delete').onclick=()=>{if(state.groups.length<2){alert('Create another group before deleting this one.');return}if(confirm('Permanently delete this group and its expenses? Export a backup first if needed.')){state.groups=state.groups.filter(g=>g.id!==state.active);state.active=state.groups[0].id;state.selected=state.members.slice();persist();render()}};
+$('addMember').onclick=()=>{let n=$('newMember').value.trim();if(!n)return;if(state.members.some(x=>x.toLowerCase()===n.toLowerCase())){alert('That member already exists.');return}state.members.push(n);state.selected.push(n);$('newMember').value='';persist();render()};
+$('members').onclick=e=>{let b=e.target.closest('[data-remove]');if(!b)return;let n=state.members[+b.dataset.remove];if(confirm('Remove '+n+' from all groups and their expense lists?')){state.members=state.members.filter(x=>x!==n);state.selected=state.selected.filter(x=>x!==n);state.groups.forEach(g=>g.expenses=g.expenses.map(e=>({...e,people:e.people.filter(p=>p!==n)})).filter(e=>e.people.length));persist();render()}};
+$('participants').onchange=e=>{let b=e.target.closest('[data-person]');if(!b)return;let n=state.members[+b.dataset.person];state.selected=b.checked?[...state.selected,n]:state.selected.filter(x=>x!==n);render()};
+$('all').onclick=()=>{if(!group().finished){state.selected=state.members.slice();render()}};$('none').onclick=()=>{if(!group().finished){state.selected=[];render()}};$('amount').oninput=render;
+$('saveExpense').onclick=()=>{let g=group(),desc=$('desc').value.trim(),amount=Number($('amount').value);if(g.finished)return alert('This group is finished. Create or select an active group.');if(!desc||!Number.isFinite(amount)||amount<=0)return alert('Enter a description and valid amount.');if(!state.selected.length)return alert('Select at least one member.');g.expenses.push({id:String(Date.now()),desc,amount:Math.round(amount*100)/100,people:state.selected.slice()});$('desc').value=$('amount').value='';persist();render()};
+$('history').onclick=e=>{let b=e.target.closest('[data-delete]');if(!b||group().finished)return;if(confirm('Delete this collection?')){group().expenses=group().expenses.filter(x=>x.id!==b.dataset.delete);persist();render()}};
+function download(data,name){let a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+$('exportGroup').onclick=()=>download({members:state.members,group:group()},group().name.replace(/[^a-z0-9_-]/gi,'_')+'-backup.json');$('exportAll').onclick=()=>download(state,'group-calculator-backup.json');$('import').onclick=()=>$('file').click();
+$('file').onchange=async e=>{let f=e.target.files[0];if(!f)return;try{let d=JSON.parse(await f.text());if(!Array.isArray(d.members))throw 0;if(Array.isArray(d.groups)&&d.groups.length){state=d;state.active=state.active||state.groups[0].id;state.selected=state.selected||state.members.slice()}else if(d.group&&Array.isArray(d.group.expenses)){state.members=[...new Set([...state.members,...d.members])];let g={...d.group,id:'g'+Date.now()};state.groups.push(g);state.active=g.id;state.selected=state.members.slice()}else throw 0;persist();render()}catch(err){alert('Invalid backup file.')}e.target.value=''};
+$('copy').onclick=async()=>{let g=group(),shares=Object.fromEntries(state.members.map(n=>[n,0]));g.expenses.forEach(e=>e.people.forEach(n=>{if(n in shares)shares[n]+=e.amount/e.people.length}));let t=g.name+'\nTotal: '+money(g.expenses.reduce((s,e)=>s+e.amount,0))+'\n'+state.members.map(n=>n+': '+money(shares[n])).join('\n');try{await navigator.clipboard.writeText(t);alert('Summary copied.')}catch(e){alert(t)}};
+load();render();renderArchives();
+</script></body></html>
